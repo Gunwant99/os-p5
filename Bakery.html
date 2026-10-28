@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bakery: Producer-Consumer Simulation</title>
+<style>
+  :root {
+    --bg: #fdf3e3; --card: #fffaf1; --ink: #3b2a1a; --muted: #8a7358;
+    --wood: #b9793f; --wood-dark: #8f5a2a; --green: #3f8f4f; --red: #c0492f; --amber: #d9902f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+  header { text-align: center; padding: 24px 16px 8px; }
+  header h1 { margin: 0; font-size: 1.8rem; }
+  header p { margin: 6px 0 0; color: var(--muted); }
+  main { max-width: 1000px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+
+  .controls { background: var(--card); border-radius: 14px; padding: 14px 16px; display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  .controls label { font-size: .85rem; color: var(--muted); display: grid; gap: 4px; }
+  .controls input[type=range] { width: 140px; accent-color: var(--wood); }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 9px 18px; cursor: pointer; color: #fff; background: var(--wood); }
+  button:hover { background: var(--wood-dark); }
+  button.secondary { background: #e6d5bb; color: var(--ink); }
+  button.secondary:hover { background: #d8c3a2; }
+
+  .stage { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 760px) { .stage { grid-template-columns: 1fr; } }
+  .col h2 { margin: 0 0 10px; font-size: 1.05rem; }
+  .col h2 small { color: var(--muted); font-weight: 400; }
+
+  .worker { background: var(--card); border-radius: 12px; padding: 10px 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; border-left: 6px solid var(--muted); box-shadow: 0 2px 6px rgba(0,0,0,.07); transition: border-color .2s; }
+  .worker .icon { font-size: 1.8rem; }
+  .worker .name { font-weight: 600; }
+  .worker .status { font-size: .85rem; color: var(--muted); }
+  .worker.working { border-color: var(--green); }
+  .worker.waiting { border-color: var(--red); }
+  .worker.waiting .status { color: var(--red); font-weight: 600; }
+
+  .shelf-box { background: var(--card); border-radius: 14px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  .shelf { display: flex; gap: 8px; justify-content: center; padding: 10px 10px 0; border-bottom: 12px solid var(--wood); border-radius: 4px; min-height: 84px; align-items: flex-end; }
+  .slot { width: 56px; height: 64px; border: 2px dashed #d9c4a0; border-bottom: 0; border-radius: 8px 8px 0 0; display: grid; place-items: center; }
+  .loaf { font-size: 2rem; opacity: 0; transform: translateY(-30px) scale(.5); transition: all .3s ease; }
+  .slot.filled .loaf { opacity: 1; transform: none; }
+  .shelf-title { text-align: center; margin: 10px 0 0; font-weight: 600; }
+  .banner { text-align: center; margin-top: 6px; min-height: 1.3em; font-size: .9rem; font-weight: 600; }
+  .banner.full { color: var(--red); } .banner.empty { color: var(--amber); }
+
+  .sems { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .sem { background: #f4e6cf; border-radius: 10px; padding: 8px; text-align: center; }
+  .sem b { display: block; font-size: 1.4rem; }
+  .sem span { font-size: .75rem; color: var(--muted); }
+  .sem.locked { background: #f3c9bd; }
+
+  .stats { display: flex; justify-content: center; gap: 24px; margin-top: 12px; font-size: .9rem; }
+
+  .log { background: #2b1f14; color: #f1e2c8; border-radius: 12px; padding: 12px 14px; font-family: ui-monospace, Consolas, monospace; font-size: .8rem; height: 170px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+  .log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .log .b { color: #9bd8a5; } .log .c { color: #f3c48a; } .log .w { color: #ff9c86; }
+  footer { text-align: center; color: var(--muted); font-size: .8rem; padding: 0 16px 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🥖 Bakery: Producer-Consumer Problem</h1>
+  <p>Bakers (producers) fill the shelf. Customers (consumers) empty it. Semaphores keep them in sync.</p>
+</header>
+
+<main>
+  <section class="controls">
+    <button id="toggle">Start</button>
+    <button id="reset" class="secondary">Reset</button>
+    <label>Shelf capacity: <span id="capVal">5</span>
+      <input type="range" id="cap" min="1" max="8" value="5"></label>
+    <label>Baker speed: <span id="bakeVal">1.5s</span>
+      <input type="range" id="bake" min="400" max="3000" step="100" value="1500"></label>
+    <label>Customer speed: <span id="buyVal">1.5s</span>
+      <input type="range" id="buy" min="400" max="3000" step="100" value="1500"></label>
+  </section>
+
+  <section class="stage">
+    <div class="col"><h2>👨‍🍳 Bakers <small>(producers)</small></h2><div id="bakers"></div></div>
+
+    <div class="col">
+      <h2 style="text-align:center">Display Shelf <small>(buffer)</small></h2>
+      <div class="shelf-box">
+        <div class="shelf" id="shelf"></div>
+        <p class="shelf-title" id="shelfTitle"></p>
+        <div class="banner" id="banner"></div>
+        <div class="sems">
+          <div class="sem"><b id="semEmpty">5</b><span>empty (free slots)</span></div>
+          <div class="sem"><b id="semFull">0</b><span>full (loaves ready)</span></div>
+          <div class="sem" id="semMutexBox"><b id="semMutex">1</b><span>mutex (1 = free)</span></div>
+        </div>
+        <div class="stats"><span>🍞 Baked: <b id="baked">0</b></span><span>🛒 Sold: <b id="sold">0</b></span></div>
+      </div>
+    </div>
+
+    <div class="col"><h2>🛍️ Customers <small>(consumers)</small></h2><div id="customers"></div></div>
+  </section>
+
+  <section class="log" id="log"></section>
+</main>
+
+<footer>Rule: wait(empty) → wait(mutex) → change shelf → signal(mutex) → signal(full). Consumers do the reverse.</footer>
+
+<script>
+const NUM_BAKERS = 2, NUM_CUSTOMERS = 3, TICK = 100;
+const $ = id => document.getElementById(id);
+let cap = 5, bakeMs = 1500, buyMs = 1500;
+let shelf, bakers, customers, baked, sold, running = false, timer = null, breadId = 0;
+
+const rand = base => base * (0.6 + Math.random() * 0.8);
+
+function makeWorkers(n, type) {
+  return Array.from({ length: n }, (_, i) => ({ id: i + 1, type, state: 'working', t: rand(type === 'baker' ? bakeMs : buyMs) }));
+}
+
+function buildStatic() {
+  $('shelf').innerHTML = Array.from({ length: cap }, () => '<div class="slot"><div class="loaf">🍞</div></div>').join('');
+  const card = (w, icon, label) => `<div class="worker working" id="${w.type}${w.id}"><div class="icon">${icon}</div><div><div class="name">${label} ${w.id}</div><div class="status"></div></div></div>`;
+  $('bakers').innerHTML = bakers.map(w => card(w, '👨‍🍳', 'Baker')).join('');
+  $('customers').innerHTML = customers.map(w => card(w, '🧑‍💼', 'Customer')).join('');
+}
+
+function log(text, cls) {
+  const box = $('log'), line = document.createElement('div');
+  line.className = cls; line.textContent = text; box.appendChild(line);
+  while (box.children.length > 9) box.removeChild(box.firstChild);
+}
+
+function flashMutex() {
+  $('semMutex').textContent = '0'; $('semMutexBox').classList.add('locked');
+  setTimeout(() => { $('semMutex').textContent = '1'; $('semMutexBox').classList.remove('locked'); }, 250);
+}
+
+function render() {
+  [...$('shelf').children].forEach((slot, i) => slot.classList.toggle('filled', i < shelf.length));
+  $('semEmpty').textContent = cap - shelf.length;
+  $('semFull').textContent = shelf.length;
+  $('shelfTitle').textContent = `${shelf.length} / ${cap} loaves`;
+  $('baked').textContent = baked; $('sold').textContent = sold;
+  const b = $('banner');
+  if (shelf.length === cap) { b.textContent = 'Shelf FULL: bakers must wait'; b.className = 'banner full'; }
+  else if (shelf.length === 0) { b.textContent = 'Shelf EMPTY: customers must wait'; b.className = 'banner empty'; }
+  else { b.textContent = ''; b.className = 'banner'; }
+  [...bakers, ...customers].forEach(w => {
+    const el = $(w.type + w.id);
+    el.className = 'worker ' + w.state;
+    el.querySelector('.status').textContent =
+      w.state === 'waiting' ? (w.type === 'baker' ? 'Waiting: shelf is full' : 'Waiting: shelf is empty')
+                            : (w.type === 'baker' ? 'Baking...' : 'Browsing...');
+  });
+}
+
+function step(w) {
+  if (w.type === 'baker') {
+    if (shelf.length >= cap) { if (w.state !== 'waiting') log(`Baker ${w.id}: shelf FULL, waiting`, 'w'); w.state = 'waiting'; return; }
+    const bread = `Bread-${++breadId}`;
+    shelf.push(bread); baked++; flashMutex();
+    log(`Baker ${w.id} placed ${bread}  (${shelf.length}/${cap})`, 'b');
+    w.state = 'working'; w.t = rand(bakeMs);
+  } else {
+    if (shelf.length === 0) { if (w.state !== 'waiting') log(`Customer ${w.id}: shelf EMPTY, waiting`, 'w'); w.state = 'waiting'; return; }
+    const bread = shelf.shift(); sold++; flashMutex();
+    log(`Customer ${w.id} bought ${bread}  (${shelf.length}/${cap})`, 'c');
+    w.state = 'working'; w.t = rand(buyMs);
+  }
+}
+
+function tick() {
+  // shuffle so no worker always wins when several are waiting
+  [...bakers, ...customers].sort(() => Math.random() - 0.5).forEach(w => {
+    if (w.state === 'working') w.t -= TICK;
+    if (w.t <= 0) step(w);
+  });
+  render();
+}
+
+function reset() {
+  clearInterval(timer); running = false; $('toggle').textContent = 'Start';
+  shelf = []; baked = 0; sold = 0; breadId = 0;
+  bakers = makeWorkers(NUM_BAKERS, 'baker'); customers = makeWorkers(NUM_CUSTOMERS, 'customer');
+  $('log').innerHTML = ''; buildStatic(); render();
+}
+
+$('toggle').onclick = () => {
+  running = !running;
+  $('toggle').textContent = running ? 'Pause' : 'Start';
+  if (running) timer = setInterval(tick, TICK); else clearInterval(timer);
+};
+$('reset').onclick = reset;
+$('cap').oninput = e => { cap = +e.target.value; $('capVal').textContent = cap; reset(); };
+$('bake').oninput = e => { bakeMs = +e.target.value; $('bakeVal').textContent = (bakeMs / 1000).toFixed(1) + 's'; };
+$('buy').oninput = e => { buyMs = +e.target.value; $('buyVal').textContent = (buyMs / 1000).toFixed(1) + 's'; };
+
+reset();
+</script>
+</body>
+</html>
